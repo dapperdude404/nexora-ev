@@ -16,10 +16,14 @@ class LiteActivity : Activity() {
  val soc=field("Charge %",prefs.getString("soc","75") ?: "75")
  val eff=field("Consumption Wh/km",prefs.getString("eff","35") ?: "35")
  val result=label("Enter measured values")
+ val history=label(prefs.getString("history","No saved estimates") ?: "No saved estimates")
  layout.addView(Button(this).apply { text="Estimate and save"; setOnClickListener {
  try { val range=RangeEngine.estimate(soc.text.toString().toDouble(),eff.text.toString().toDouble(),0.9)
  result.text=String.format(java.util.Locale.US,"%.1f km • illustrative",range)
- prefs.edit().putString("soc",soc.text.toString()).putString("eff",eff.text.toString()).apply()
+ val entry=java.text.DateFormat.getDateTimeInstance().format(java.util.Date())+" • "+result.text
+ val records=(listOf(entry)+(prefs.getString("history","") ?: "").lines().filter { it.isNotBlank() }).take(10).joinToString("\n")
+ history.text=records
+ prefs.edit().putString("soc",soc.text.toString()).putString("eff",eff.text.toString()).putString("history",records).apply()
  } catch(e:Exception){result.text="Invalid input"} } })
  val network=label("Offline mode • No scooter connection")
  val address=EditText(this).apply { hint="Scoped IPv6 address"; inputType=1; layout.addView(this) }
