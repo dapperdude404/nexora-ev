@@ -29,6 +29,8 @@ class LiteActivity : Activity() {
     private var mediaTitle = "No audio selected"
     private var page = "Connect"
     private var checking = false
+    private var lastVersion: String? = null
+    private var lastVersionAt = 0L
     private var connectionGeneration = 0
     private val ink = Color.rgb(231,240,249)
     private val muted = Color.rgb(156,179,195)
@@ -123,7 +125,8 @@ class LiteActivity : Activity() {
         val p=panel("My EV")
         text(p,"S1 Pro Gen 3",25f)
         text(p,"Selected profile • MoveOS 5.6.2 (user reported)",13f,muted)
-        text(p,"●  NOT CONNECTED",16f,Color.rgb(251,146,120))
+        text(p,if(lastVersion==null) "●  NOT CONNECTED" else "●  VERSION RESPONSE RECEIVED",16f,if(lastVersion==null) Color.rgb(251,146,120) else accent)
+        lastVersion?.let { text(p,"Reported software: "+it+" • "+java.text.DateFormat.getTimeInstance().format(java.util.Date(lastVersionAt)),14f,muted) }
         button(p,"Open Smart Connect") { show("Connect") }
         val q=panel("Battery & range")
         text(q,"— %",42f)
@@ -172,7 +175,7 @@ class LiteActivity : Activity() {
     }
     private fun help() {
         val p=panel("Rex • Help center")
-        val questions=listOf("How do I connect?" to "Park, keep the scooter awake and join the phone hotspot from its normal Wi-Fi settings. Smart Connect can test a known authorized endpoint. A reachable endpoint is not a verified vehicle session.","Why are readings blank?" to "NEXORA has no verified live telemetry adapter. Use the original companion for live vehicle status.","Can I install scooter mods?" to "Remote installation is not supported in this build. Use manufacturer-supported installation and permission prompts.","How does TrueRange work?" to "Enter completed trip distance and start/end charge. The model learns energy-weighted consumption using an assumed usable battery capacity.","Does the app read my scooter RAM?" to "Only the RAM of the Android device where NEXORA runs is measured.")
+        val questions=listOf("How do I connect?" to "Park, keep the scooter awake and join the phone hotspot from its normal Wi-Fi settings. Smart Connect can request the software version from a known authorized endpoint. A response is not an authenticated vehicle session.","Why are readings blank?" to "NEXORA has no verified live telemetry adapter. Use the original companion for live vehicle status.","Can I install scooter mods?" to "Remote installation is not supported in this build. Use manufacturer-supported installation and permission prompts.","How does TrueRange work?" to "Enter completed trip distance and start/end charge. The model learns energy-weighted consumption using an assumed usable battery capacity.","Does the app read my scooter RAM?" to "Only the RAM of the Android device where NEXORA runs is measured.")
         questions.forEach { (question,answer) -> button(p,question) { AlertDialog.Builder(this).setTitle(question).setMessage(answer).setPositiveButton("Close",null).show() } }
         val q=panel("Credits")
         text(q,"NEXORA EV • independent project")
@@ -277,15 +280,15 @@ class LiteActivity : Activity() {
     }
     private fun connect() {
         val p=panel("Smart Connect")
-        text(p,"NOT CONNECTED",24f,accent)
-        text(p,"1. Park your scooter and turn on the phone hotspot.\n2. Join the hotspot from the scooter Wi-Fi settings.\n3. Check connected devices in your hotspot settings.\n4. Enter an address and a port for a service you are authorized to access.")
+        text(p,if(lastVersion==null) "NOT CONNECTED" else "LAST VERSION QUERY SUCCEEDED",24f,accent)
+        text(p,"1. Park your scooter and turn on the phone hotspot.\n2. Join the hotspot from the scooter Wi-Fi settings.\n3. Check connected devices in your hotspot settings.\n4. Enter the scooter address for an authorized read-only version query.")
         val status=text(p,"No vehicle session established.",16f,muted)
         button(p,"Open Wi-Fi settings") { try { startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)) } catch(e:Exception) { status.text="Wi-Fi settings unavailable" } }
         button(p,"Inspect local interfaces") { status.text=NetworkInfo.interfaces() }
         text(p,"Scooter IPv6 address with phone-side interface scope",14f,muted)
         val address=EditText(this).apply { setSingleLine(true); hint="fe80::…%interface"; setTextColor(ink); inputType=1; setText(prefs.getString("endpoint","")); p.addView(this) }
-        val port=field(p,"Authorized service port (no default)","")
-        button(p,"Test TCP reachability") {
+        val port=field(p,"Diagnostics service port","50005")
+        button(p,"Read scooter software version") {
             if(checking) return@button
             val raw=address.text.toString().trim()
             val n=port.text.toString().toIntOrNull()
@@ -293,29 +296,31 @@ class LiteActivity : Activity() {
             if(n==null || n !in 1..65535 || parts.size!=2 || !parts[0].contains(':') || !parts[0].matches(Regex("[a-fA-F0-9:]+")) || !parts[1].matches(Regex("[a-zA-Z0-9_.-]+"))) {
                 status.text="Enter a scoped link-local IPv6 address and an authorized service port."; return@button
             }
+            lastVersion=null
             checking=true
             val generation=++connectionGeneration
-            status.text="Checking reachability…"
+            status.text="Requesting software version…"
             Thread {
+                var version: String?=null
                 val result=try {
                     val unscoped=java.net.InetAddress.getByName(parts[0]) as? java.net.Inet6Address ?: throw IllegalArgumentException()
                     require(unscoped.isLinkLocalAddress)
                     val iface=java.net.NetworkInterface.getByName(parts[1]) ?: parts[1].toIntOrNull()?.let { java.net.NetworkInterface.getByIndex(it) } ?: throw IllegalArgumentException()
                     require(iface.isUp)
                     val peer=java.net.Inet6Address.getByAddress(null,unscoped.address,iface)
-                    java.net.Socket().use { it.connect(java.net.InetSocketAddress(peer,n),3000) }
-                    "TCP endpoint reachable. Socket closed. Vehicle identity and telemetry remain unverified."
+                    version=VehicleVersion.read(peer,n)
+                    "Version response: "+version+" • Read-only query completed. Identity and live battery telemetry not verified."
                 } catch(e:java.net.SocketTimeoutException) { "Connection timed out. Check hotspot, scope and service availability." }
                 catch(e:java.net.ConnectException) { "Connection refused or unreachable. No vehicle session." }
                 catch(e:Exception) { "Cannot reach endpoint. Check address and phone-side interface." }
                 runOnUiThread {
-                    if(!isFinishing && !isDestroyed && page=="Connect" && generation==connectionGeneration) { checking=false; status.text=result }
+                    if(!isFinishing && !isDestroyed && page=="Connect" && generation==connectionGeneration) { checking=false; status.text=result; lastVersion=version; if(version!=null) { lastVersionAt=System.currentTimeMillis(); prefs.edit().putString("endpoint",raw).apply() } }
                 }
             }.start()
         }
         button(p,"Open installed S1Mods companion") { launchReference() }
         button(p,"Continue offline") { show("Home") }
-        text(p,"Reachability test sends no vehicle commands or authentication data. A successful TCP test is not live scooter connectivity.",14f,muted)
+        text(p,"Only GetSwVersion is requested over the local network; no shell commands or authentication changes. Transport is not authenticated. A version response is not live BMS connectivity.",14f,muted)
     }
     private fun media() {
         val p=panel("Media Hub • local audio")
