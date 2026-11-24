@@ -13,6 +13,7 @@ jobs:
         with:
           gradle-version: '8.9'
       - run: javac -d /tmp/nexora app/src/main/java/com/nexora/ev/RangeEngine.java RangeTest.java && java -cp /tmp/nexora RangeTest
+      - run: javac -d /tmp/nexora app/src/main/java/com/nexora/ev/TripLearning.java TripLearningTest.java && java -cp /tmp/nexora TripLearningTest
       - run: python3 tools/range_analysis.py
       - run: gradle assembleDebug
       - name: Enforce APK size budget
