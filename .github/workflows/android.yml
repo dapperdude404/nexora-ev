@@ -15,6 +15,9 @@ jobs:
       - run: javac -d /tmp/nexora app/src/main/java/com/nexora/ev/RangeEngine.java RangeTest.java && java -cp /tmp/nexora RangeTest
       - run: python3 tools/range_analysis.py
       - run: gradle assembleDebug
+      - name: Enforce APK size budget
+        run: |
+          python3 -c "from pathlib import Path; a=list(Path('app/build/outputs/apk/debug').glob('*.apk')); assert a, 'No APK'; print([(p.name,p.stat().st_size) for p in a]); assert all(p.stat().st_size <= 50000000 for p in a), '50 MB budget exceeded'"
       - uses: actions/upload-artifact@v4
         with:
           name: nexora-debug
