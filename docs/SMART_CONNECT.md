@@ -1,0 +1,2 @@
+# Smart Connect v1.2
+APK budget: 30 MB maximum target, not measured. Phone hotspot -> scooter Wi-Fi client. Link-local IPv6 requires correct interface scope. Android interface visibility varies by device. Local interface inspection is not peer discovery or proof of scooter connection. No undocumented authorization or shell access. Future transport requires verified supported protocol and permissions. No background scanning. Test parked only.
