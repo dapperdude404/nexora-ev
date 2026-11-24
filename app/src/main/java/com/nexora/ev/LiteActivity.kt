@@ -75,7 +75,7 @@ class LiteActivity : Activity() {
         text(root,"ADAPTIVE LITE PRO  •  OFFLINE / MANUAL DATA",12f,muted)
         val nav = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false }
         val tabs = LinearLayout(this)
-        listOf("Home","Energy","History","Connect","Media","System").forEach { name ->
+        listOf("Home","Energy","Learn","History","Connect","Media","System").forEach { name ->
             button(tabs,if(name==page) "• "+name else name) { show(name) }
         }
         nav.addView(tabs); root.addView(nav)
@@ -84,6 +84,7 @@ class LiteActivity : Activity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1,0,1f))
         when(page) {
             "Energy" -> energy()
+            "Learn" -> learn()
             "History" -> history()
             "Connect" -> connect()
             "Media" -> media()
@@ -104,6 +105,7 @@ class LiteActivity : Activity() {
         text(p,"Assumes 90% usable fraction; not an OEM estimate.",13f,muted)
         val q=panel("Quick actions")
         button(q,"Plan a trip") { show("Energy") }
+        button(q,"Learn my real-world efficiency") { show("Learn") }
         button(q,"Inspect local network") { show("Connect") }
         button(q,"Open local music") { show("Media") }
         button(q,"View trip journal") { show("History") }
@@ -138,6 +140,47 @@ class LiteActivity : Activity() {
             prefs.edit().putString("soc",a.toString()).putString("eff",b.toString()).putString("journal",arr.toString()).apply()
         }
         text(p,"Planning estimate only: terrain, temperature and battery health can change real range.",13f,muted)
+    }
+    private fun measuredTrips(): JSONArray = try { JSONArray(prefs.getString("measuredTrips","[]") ?: "[]") } catch(e:Exception) { JSONArray() }
+    private fun trained(): TripLearning {
+        val m=TripLearning()
+        val a=measuredTrips()
+        for(i in 0 until a.length()) {
+            try { val x=a.getJSONObject(i); m.add(x.getDouble("km"),x.getDouble("wh")) } catch(e:Exception) {}
+        }
+        return m
+    }
+    private fun learn() {
+        val p=panel("TrueRange • Personal efficiency")
+        text(p,"Record completed trips without charging between the start and end readings. Energy is estimated from manually entered battery percentage and assumed usable capacity of 3.6 kWh.",14f,muted)
+        val m=trained()
+        if(m.count()>0) {
+            text(p,fmt(m.consumption())+" Wh/km",30f,accent)
+            text(p,m.count().toString()+" completed trips • "+fmt(m.distance())+" km of observations")
+            val soc=prefs.getString("soc","75")?.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..100.0 } ?: 75.0
+            text(p,"Range at last entered charge, above 10% reserve: "+fmt(m.range(3600.0,soc,10.0))+" km")
+            button(p,"Use learned consumption in planner") { prefs.edit().putString("eff",m.consumption().toString()).apply(); show("Energy") }
+        } else text(p,"No observations yet. Add your first completed trip.")
+        val km=field(p,"Actual distance (km)","")
+        val start=field(p,"Starting battery (%)","")
+        val end=field(p,"Ending battery (%)","")
+        val status=text(p,"Park before entering readings.",14f,muted)
+        button(p,"Save completed trip") {
+            try {
+                val a=km.text.toString().toDouble()
+                val b=start.text.toString().toDouble()
+                val c=end.text.toString().toDouble()
+                val wh=TripLearning.energy(3600.0,b,c)
+                val check=TripLearning(); check.add(a,wh)
+                val old=measuredTrips()
+                val next=JSONArray().put(JSONObject().put("km",a).put("wh",wh).put("start",b).put("end",c).put("time",System.currentTimeMillis()))
+                for(i in 0 until minOf(199,old.length())) next.put(old.getJSONObject(i))
+                prefs.edit().putString("measuredTrips",next.toString()).apply()
+                show("Learn")
+            } catch(e:Exception) { status.text="Check distance (1–1000 km), falling charge and plausible consumption (5–250 Wh/km)." }
+        }
+        button(p,"Reset learning history") { AlertDialog.Builder(this).setMessage("Delete completed trip observations?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> prefs.edit().remove("measuredTrips").apply(); show("Learn") }.show() }
+        text(p,"Statistical estimate, not live BMS data or a validated vehicle range prediction.",13f,muted)
     }
     private fun history() {
         val p=panel("Local trip journal")
