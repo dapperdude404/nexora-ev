@@ -1,0 +1,2 @@
+# Compatibility profile
+Gen 3, nominal 4 kWh, user-reported Android 13 and 3 GB RAM. Dashboard 5.6.2 / app 5.4.1 are unverified compatibility targets. No live transport enabled. Only use supported owner-authorized interfaces. No ADB authorization bypass, vehicle control, or firmware modification. Test phone first; dashboard only while parked and with supported installation. Memory PSS is sampled on demand; no background polling.
