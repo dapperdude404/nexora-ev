@@ -37,6 +37,21 @@ class LiteActivity : Activity() {
  layout.addView(Button(this).apply { text="Continue offline"; setOnClickListener { address.text.clear(); network.text="Offline mode • Manual estimates available" } })
  val mem=label("Memory: not sampled")
  layout.addView(Button(this).apply { text="Sample app memory"; setOnClickListener { val info=Debug.MemoryInfo(); Debug.getMemoryInfo(info); mem.text="App PSS: ${info.totalPss/1024} MiB" } })
+ val profile=Spinner(this).apply { adapter=ArrayAdapter<String>(this@LiteActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Eco","Balanced","Pro")); setSelection(prefs.getInt("profile",1).coerceIn(0,2)); layout.addView(this) }
+ val budget=label("Trip energy planner • Manual inputs")
+ val distance=field("Trip distance km","20")
+ layout.addView(Button(this).apply { text="Calculate trip energy"; setOnClickListener {
+ val km=distance.text.toString().toDoubleOrNull()
+ val wh=eff.text.toString().toDoubleOrNull()
+ val charge=soc.text.toString().toDoubleOrNull()
+ if(km==null || wh==null || charge==null || !km.isFinite() || !wh.isFinite() || !charge.isFinite() || km<0 || wh<=0 || charge !in 0.0..100.0) budget.text="Invalid trip inputs" else {
+ val needed=km*wh
+ val available=4000*charge/100*0.9
+ budget.text=String.format(java.util.Locale.US,"Trip: %.2f kWh • Estimated remaining: %.2f kWh",needed/1000,(available-needed)/1000)
+ }
+ } })
+ layout.addView(Button(this).apply { text="Save display preference"; setOnClickListener { prefs.edit().putInt("profile",profile.selectedItemPosition).apply(); Toast.makeText(this@LiteActivity,"Preference saved; no vehicle settings changed",Toast.LENGTH_SHORT).show() } })
+ label("Display profile preference only • No vehicle performance changes")
  label("Live telemetry unavailable • MoveOS compatibility unverified")
  setContentView(ScrollView(this).apply { addView(layout) })
  }
