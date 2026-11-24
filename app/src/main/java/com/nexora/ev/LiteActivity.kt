@@ -27,7 +27,9 @@ class LiteActivity : Activity() {
     private var mediaReady = false
     private var mediaState: TextView? = null
     private var mediaTitle = "No audio selected"
-    private var page = "Home"
+    private var page = "Connect"
+    private var checking = false
+    private var connectionGeneration = 0
     private val ink = Color.rgb(231,240,249)
     private val muted = Color.rgb(156,179,195)
     private val accent = Color.rgb(45,212,191)
@@ -40,7 +42,7 @@ class LiteActivity : Activity() {
         super.onCreate(state)
         window.statusBarColor = Color.rgb(10,18,27)
         window.navigationBarColor = Color.rgb(10,18,27)
-        show(state?.getString("page") ?: "Home")
+        show(state?.getString("page") ?: "Connect")
     }
     override fun onSaveInstanceState(out: Bundle) { out.putString("page", page); super.onSaveInstanceState(out) }
 
@@ -68,11 +70,13 @@ class LiteActivity : Activity() {
         }
     }
     private fun show(next: String) {
+        connectionGeneration++
+        checking = false
         page = next
         mediaState = null
         root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(10,18,27)); setPadding(dp(12),dp(8),dp(12),dp(8)) }
         text(root,"NEXORA  /  EV",24f,accent).setTypeface(null,Typeface.BOLD)
-        text(root,"ADAPTIVE LITE PRO  •  OFFLINE / MANUAL DATA",12f,muted)
+        text(root,"ADAPTIVE LITE PRO  •  NO LIVE TELEMETRY",12f,muted)
         val nav = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false }
         val tabs = LinearLayout(this)
         listOf("Home","Energy","Learn","History","Connect","Media","System").forEach { name ->
@@ -91,7 +95,9 @@ class LiteActivity : Activity() {
             "System" -> system()
             else -> home()
         }
+        if(Build.VERSION.SDK_INT >= 35) { root.setOnApplyWindowInsetsListener { v, ins -> val bars=ins.getInsets(android.view.WindowInsets.Type.systemBars()); v.setPadding(dp(12)+bars.left,dp(8)+bars.top,dp(12)+bars.right,dp(8)+bars.bottom); ins } }
         setContentView(root)
+        root.requestApplyInsets()
     }
     private fun home() {
         val p=panel("Vehicle profile")
@@ -210,19 +216,45 @@ class LiteActivity : Activity() {
         if(legacy.isNotBlank()) text(panel("Earlier estimates"),legacy,14f)
     }
     private fun connect() {
-        val p=panel("Smart Connect • local inspection")
-        text(p,"Connect the parked scooter to your phone hotspot using its normal Wi-Fi settings.")
-        val status=text(p,"No scooter session established",18f,accent)
-        button(p,"Refresh IPv6 interfaces") { status.text=NetworkInfo.interfaces() }
-        button(p,"Open system Wi-Fi settings") { try { startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)) } catch(e:Exception) { status.text="Wi-Fi settings unavailable" } }
-        text(p,"Manual link-local address (with local interface scope)",14f,muted)
-        val address=EditText(this).apply { setSingleLine(true); hint="fe80::…%interface"; setTextColor(ink); inputType=1; p.addView(this) }
-        button(p,"Validate address format") {
-            val parts=address.text.toString().trim().split('%')
-            val valid=try { parts.size==2 && parts[0].contains(':') && parts[0].matches(Regex("[0-9a-fA-F:]+")) && parts[1].matches(Regex("[a-zA-Z0-9_.-]+")) && (java.net.InetAddress.getByName(parts[0]) as? java.net.Inet6Address)?.isLinkLocalAddress==true } catch(e:Exception) { false }
-            status.text=if(valid) "Valid IPv6 format. No remote session established." else "Invalid scoped link-local IPv6 address."
+        val p=panel("Smart Connect")
+        text(p,"NOT CONNECTED",24f,accent)
+        text(p,"1. Park your scooter and turn on the phone hotspot.\n2. Join the hotspot from the scooter Wi-Fi settings.\n3. Check connected devices in your hotspot settings.\n4. Enter an address and a port for a service you are authorized to access.")
+        val status=text(p,"No vehicle session established.",16f,muted)
+        button(p,"Open Wi-Fi settings") { try { startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)) } catch(e:Exception) { status.text="Wi-Fi settings unavailable" } }
+        button(p,"Inspect local interfaces") { status.text=NetworkInfo.interfaces() }
+        text(p,"Scooter IPv6 address with phone-side interface scope",14f,muted)
+        val address=EditText(this).apply { setSingleLine(true); hint="fe80::…%interface"; setTextColor(ink); inputType=1; setText(prefs.getString("endpoint","")); p.addView(this) }
+        val port=field(p,"Authorized service port (no default)","")
+        button(p,"Test TCP reachability") {
+            if(checking) return@button
+            val raw=address.text.toString().trim()
+            val n=port.text.toString().toIntOrNull()
+            val parts=raw.split('%')
+            if(n==null || n !in 1..65535 || parts.size!=2 || !parts[0].contains(':') || !parts[0].matches(Regex("[a-fA-F0-9:]+")) || !parts[1].matches(Regex("[a-zA-Z0-9_.-]+"))) {
+                status.text="Enter a scoped link-local IPv6 address and an authorized service port."; return@button
+            }
+            checking=true
+            val generation=++connectionGeneration
+            status.text="Checking reachability…"
+            Thread {
+                val result=try {
+                    val unscoped=java.net.InetAddress.getByName(parts[0]) as? java.net.Inet6Address ?: throw IllegalArgumentException()
+                    require(unscoped.isLinkLocalAddress)
+                    val iface=java.net.NetworkInterface.getByName(parts[1]) ?: parts[1].toIntOrNull()?.let { java.net.NetworkInterface.getByIndex(it) } ?: throw IllegalArgumentException()
+                    require(iface.isUp)
+                    val peer=java.net.Inet6Address.getByAddress(null,unscoped.address,iface)
+                    java.net.Socket().use { it.connect(java.net.InetSocketAddress(peer,n),3000) }
+                    "TCP endpoint reachable. Socket closed. Vehicle identity and telemetry remain unverified."
+                } catch(e:java.net.SocketTimeoutException) { "Connection timed out. Check hotspot, scope and service availability." }
+                catch(e:java.net.ConnectException) { "Connection refused or unreachable. No vehicle session." }
+                catch(e:Exception) { "Cannot reach endpoint. Check address and phone-side interface." }
+                runOnUiThread {
+                    if(!isFinishing && !isDestroyed && page=="Connect" && generation==connectionGeneration) { checking=false; status.text=result }
+                }
+            }.start()
         }
-        text(p,"No remote commands, discovery probes or privileged authorization are performed.",14f,muted)
+        button(p,"Continue offline") { show("Home") }
+        text(p,"Reachability test sends no vehicle commands or authentication data. A successful TCP test is not live scooter connectivity.",14f,muted)
     }
     private fun media() {
         val p=panel("Media Hub • local audio")
