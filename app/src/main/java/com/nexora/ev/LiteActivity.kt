@@ -33,7 +33,7 @@ class LiteActivity : Activity() {
     private val ink = Color.rgb(231,240,249)
     private val muted = Color.rgb(156,179,195)
     private val accent = Color.rgb(45,212,191)
-    private val panelColor = Color.rgb(24,39,53)
+    private val panelColor = Color.rgb(20,26,33)
     private fun dp(n: Int) = (n * resources.displayMetrics.density + 0.5f).toInt()
     private fun fmt(n: Double) = String.format(Locale.US, "%.1f", n)
     private fun round(c: Int) = GradientDrawable().apply { setColor(c); cornerRadius = dp(14).toFloat() }
@@ -48,12 +48,12 @@ class LiteActivity : Activity() {
 
     private fun text(parent: LinearLayout, s: String, size: Float = 16f, color: Int = ink): TextView =
         TextView(this).apply {
-            this.text = s; textSize = size; setTextColor(color); setPadding(0,dp(5),0,dp(5))
+            this.text = s; textSize = size; typeface = Typeface.create("sans-serif",Typeface.NORMAL); setTextColor(color); setPadding(0,dp(5),0,dp(5))
             parent.addView(this)
         }
     private fun button(parent: LinearLayout, title: String, action: () -> Unit) {
         parent.addView(Button(this).apply {
-            text = title; isAllCaps = false; setOnClickListener { action() }
+            text = title; isAllCaps = false; typeface=Typeface.create("sans-serif-medium",Typeface.NORMAL); setTextColor(ink); background=round(Color.rgb(35,48,60)); minHeight=dp(48); setPadding(dp(12),dp(8),dp(12),dp(8)); setOnClickListener { action() }; layoutParams=LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(7) }
         })
     }
     private fun panel(title: String): LinearLayout = LinearLayout(this).apply {
@@ -77,12 +77,6 @@ class LiteActivity : Activity() {
         root = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(10,18,27)); setPadding(dp(12),dp(8),dp(12),dp(8)) }
         text(root,"NEXORA  /  EV",24f,accent).setTypeface(null,Typeface.BOLD)
         text(root,"ADAPTIVE LITE PRO  •  NO LIVE TELEMETRY",12f,muted)
-        val nav = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false }
-        val tabs = LinearLayout(this)
-        listOf("Home","Energy","Learn","History","Connect","Media","System").forEach { name ->
-            button(tabs,if(name==page) "• "+name else name) { show(name) }
-        }
-        nav.addView(tabs); root.addView(nav)
         body = LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { addView(body) }
         root.addView(scroll, LinearLayout.LayoutParams(-1,0,1f))
@@ -93,31 +87,97 @@ class LiteActivity : Activity() {
             "Connect" -> connect()
             "Media" -> media()
             "System" -> system()
+            "Modules" -> modules()
+            "Tools" -> tools()
+            "Help" -> help()
             else -> home()
         }
+        val nav=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; setPadding(0,dp(5),0,0) }
+        val selected=when(page) { "Connect" -> "Setup"; "Modules","Media" -> "Modules"; "Tools","System","Energy","Learn","History" -> "Tools"; "Help" -> "Help"; else -> "My EV" }
+        listOf("My EV" to "Home","Setup" to "Connect","Modules" to "Modules","Tools" to "Tools","Help" to "Help").forEach { (label,target) ->
+            nav.addView(TextView(this).apply {
+                text=label; textSize=12f; typeface=Typeface.create("sans-serif-medium",Typeface.NORMAL); gravity=android.view.Gravity.CENTER
+                setTextColor(if(label==selected) accent else muted); background=round(if(label==selected) panelColor else Color.TRANSPARENT)
+                minHeight=dp(54); isClickable=true; isFocusable=true; setOnClickListener { show(target) }
+            },LinearLayout.LayoutParams(0,dp(54),1f))
+        }
+        root.addView(nav)
         if(Build.VERSION.SDK_INT >= 35) { root.setOnApplyWindowInsetsListener { v, ins -> val bars=ins.getInsets(android.view.WindowInsets.Type.systemBars()); v.setPadding(dp(12)+bars.left,dp(8)+bars.top,dp(12)+bars.right,dp(8)+bars.bottom); ins } }
         setContentView(root)
         root.requestApplyInsets()
     }
+    private fun tiles(parent: LinearLayout, values: List<Pair<String,String>>, columns: Int=2) {
+        values.chunked(columns).forEach { items ->
+            val row=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL }
+            items.forEach { (label,value) ->
+                val tile=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; background=round(Color.rgb(32,41,50)); setPadding(dp(10),dp(10),dp(8),dp(10)) }
+                text(tile,value,22f,ink).setTypeface(null,Typeface.BOLD)
+                text(tile,label,12f,muted)
+                row.addView(tile,LinearLayout.LayoutParams(0,-2,1f).apply { setMargins(dp(3),dp(4),dp(3),dp(4)) })
+            }
+            repeat(columns-items.size) { row.addView(View(this),LinearLayout.LayoutParams(0,1,1f)) }
+            parent.addView(row)
+        }
+    }
     private fun home() {
-        val p=panel("Vehicle profile")
-        text(p,"Ola S1 Pro Gen 3 • 4 kWh",24f)
-        text(p,"Parked use only. No vehicle telemetry connected.",14f,muted)
-        val charge=prefs.getString("soc","75")?.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.0..100.0 } ?: 75.0
-        val wh=prefs.getString("eff","35")?.toDoubleOrNull()?.takeIf { it.isFinite() && it>0 } ?: 35.0
-        text(p,fmt(charge)+"%  •  last manual charge",30f,accent)
-        p.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply { max=100; progress=charge.toInt() })
-        text(p,"Estimated range: "+fmt(4000*charge/100*0.9/wh)+" km",19f)
-        text(p,"Assumes 90% usable fraction; not an OEM estimate.",13f,muted)
-        val q=panel("Quick actions")
-        button(q,"Plan a trip") { show("Energy") }
-        button(q,"Learn my real-world efficiency") { show("Learn") }
-        button(q,"Inspect local network") { show("Connect") }
-        button(q,"Open local music") { show("Media") }
-        button(q,"View trip journal") { show("History") }
-        val s=panel("Integration status")
-        text(s,"Live BMS, CAN, projection and vehicle-side floating controls are not connected.")
-        text(s,"This app does not alter MoveOS, vehicle settings or access permissions.",14f,muted)
+        val p=panel("My EV")
+        text(p,"S1 Pro Gen 3",25f)
+        text(p,"Selected profile • MoveOS 5.6.2 (user reported)",13f,muted)
+        text(p,"●  NOT CONNECTED",16f,Color.rgb(251,146,120))
+        button(p,"Open Smart Connect") { show("Connect") }
+        val q=panel("Battery & range")
+        text(q,"— %",42f)
+        text(q,"State of charge • awaiting vehicle data",13f,muted)
+        tiles(q,listOf("Normal range" to "— km","Sport range" to "— km","Hyper range" to "— km"),3)
+        tiles(q,listOf("Battery health" to "— %","Motor temp" to "— °C","Odometer" to "— km","Charge cycles" to "—","Speed" to "— km/h","Ride mode" to "—"))
+        val d=panel("System health diagnostics")
+        text(d,"No live BMS, motor, MCU, VCU or charger data available. Missing readings are never replaced with sample values.",14f,muted)
+        button(d,"Local device diagnostics") { show("System") }
+        val t=panel("Offline intelligence")
+        button(t,"Trip planner") { show("Energy") }
+        button(t,"TrueRange learning") { show("Learn") }
+        button(t,"Saved trip journal") { show("History") }
+    }
+    private fun launchReference() {
+        try {
+            val launch=packageManager.getLaunchIntentForPackage("com.asjohn720.s1mods")
+            if(launch!=null) startActivity(launch) else Toast.makeText(this,"S1Mods is not available on this device",Toast.LENGTH_LONG).show()
+        } catch(e:Exception) { Toast.makeText(this,"Unable to open S1Mods",Toast.LENGTH_LONG).show() }
+    }
+    private fun modules() {
+        val p=panel("Module center")
+        text(p,"Local functions",15f,muted)
+        button(p,"Media Hub • local music") { show("Media") }
+        button(p,"TrueRange • trip learning") { show("Learn") }
+        button(p,"Battery IQ • offline planner") { show("Energy") }
+        val q=panel("Scooter infotainment")
+        listOf("Smart Ball","Android Auto","OpenPlay","Remote APK manager").forEach { name ->
+            text(q,name,18f)
+            text(q,"Not integrated into NEXORA",13f,muted)
+        }
+        button(q,"Open installed S1Mods companion") { launchReference() }
+        text(q,"Opens a separate app. NEXORA does not install or remove scooter modules.",13f,muted)
+    }
+    private fun tools() {
+        val p=panel("Intelligence & diagnostics")
+        button(p,"Battery IQ • trip planner") { show("Energy") }
+        button(p,"TrueRange • learning") { show("Learn") }
+        button(p,"Trip journal & CSV sharing") { show("History") }
+        button(p,"RAM, storage & thermal diagnostics") { show("System") }
+        val q=panel("This device • settings")
+        listOf("Wi-Fi" to android.provider.Settings.ACTION_WIFI_SETTINGS,"Bluetooth" to android.provider.Settings.ACTION_BLUETOOTH_SETTINGS,"Apps" to android.provider.Settings.ACTION_APPLICATION_SETTINGS,"Display" to android.provider.Settings.ACTION_DISPLAY_SETTINGS,"Sound" to android.provider.Settings.ACTION_SOUND_SETTINGS,"Date and time" to android.provider.Settings.ACTION_DATE_SETTINGS).forEach { (label,action) ->
+            button(q,label) { try { startActivity(Intent(action)) } catch(e:Exception) { Toast.makeText(this,"Setting unavailable",Toast.LENGTH_SHORT).show() } }
+        }
+        text(q,"Settings open on the Android device running NEXORA, not remotely.",13f,muted)
+    }
+    private fun help() {
+        val p=panel("Rex • Help center")
+        val questions=listOf("How do I connect?" to "Park, keep the scooter awake and join the phone hotspot from its normal Wi-Fi settings. Smart Connect can test a known authorized endpoint. A reachable endpoint is not a verified vehicle session.","Why are readings blank?" to "NEXORA has no verified live telemetry adapter. Use the original companion for live vehicle status.","Can I install scooter mods?" to "Remote installation is not supported in this build. Use manufacturer-supported installation and permission prompts.","How does TrueRange work?" to "Enter completed trip distance and start/end charge. The model learns energy-weighted consumption using an assumed usable battery capacity.","Does the app read my scooter RAM?" to "Only the RAM of the Android device where NEXORA runs is measured.")
+        questions.forEach { (question,answer) -> button(p,question) { AlertDialog.Builder(this).setTitle(question).setMessage(answer).setPositiveButton("Close",null).show() } }
+        val q=panel("Credits")
+        text(q,"NEXORA EV • independent project")
+        text(q,"Interface inspiration: S1Mods by Anand (@asjohn720). Not affiliated with Ola Electric. No S1Mods code or bundled APKs included.",14f,muted)
+        button(q,"Open S1Mods companion") { launchReference() }
     }
     private fun journal(): JSONArray = try { JSONArray(prefs.getString("journal","[]") ?: "[]") } catch(e:Exception) { JSONArray() }
     private fun energy() {
@@ -253,6 +313,7 @@ class LiteActivity : Activity() {
                 }
             }.start()
         }
+        button(p,"Open installed S1Mods companion") { launchReference() }
         button(p,"Continue offline") { show("Home") }
         text(p,"Reachability test sends no vehicle commands or authentication data. A successful TCP test is not live scooter connectivity.",14f,muted)
     }
